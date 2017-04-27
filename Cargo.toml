@@ -1,0 +1,6 @@
+[package]
+name = "diffx"
+version = "0.1.0"
+authors = ["Barret Rennie <barret@brennie.ca>"]
+
+[dependencies]
