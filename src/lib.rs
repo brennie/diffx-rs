@@ -6,12 +6,12 @@ use std::str;
 use combine::byte::*;
 use combine::combinator::*;
 use combine::range::*;
-use combine::primitives::{Consumed, ParseResult, Parser, RangeStream};
+use combine::primitives::{ParseResult, Parser, RangeStream};
 
 
 fn is_option_char(c: u8) -> bool {
     match c {
-        b'a'...b'z' | b'A'...b'Z' | b'0'...b'9' | b'-' | b'_' => true,
+        b'a'...b'z' | b'A'...b'Z' | b'0'...b'9' | b'-' | b'_' | b'.' => true,
         _ => false,
     }
 }
@@ -41,14 +41,18 @@ impl<'a, I> DiffxParser<I>
 
 #[cfg(test)]
 mod tests {
+    use combine::primitives::Consumed::Consumed;
     use super::*;
 
     #[test]
     fn test_option() {
         assert_eq!(DiffxParser::option(&b"foo=bar"[..]),
-                   Ok((("foo", "bar"), Consumed::Consumed(&b""[..]))));
+                   Ok((("foo", "bar"), Consumed(&b""[..]))));
 
         assert_eq!(DiffxParser::option(&b"encoding=utf-8"[..]),
-                   Ok((("encoding", "utf-8"), Consumed::Consumed(&b""[..]))));
+                   Ok((("encoding", "utf-8"), Consumed(&b""[..]))));
+
+        assert_eq!(DiffxParser::option(&b"version=1.0"[..]),
+                   Ok((("version", "1.0"), Consumed(&b""[..]))));
     }
 }
