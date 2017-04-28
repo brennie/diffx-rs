@@ -1,5 +1,8 @@
 extern crate combine;
+#[macro_use]
+extern crate maplit;
 
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::str;
 
@@ -37,6 +40,16 @@ impl<'a, I> DiffxParser<I>
          byte('=' as u8).with(parser(DiffxParser::<I>::option_str)))
                 .parse_stream(input)
     }
+
+    // Parse an option list.
+    //
+    // Option lists are a list of options separated by `,`. The result is
+    // collected into a HashMap for convenience.
+    fn option_list(input: I) -> ParseResult<HashMap<&'a str, &'a str>, I> {
+        sep_by(parser(DiffxParser::<I>::option), byte(',' as u8))
+            .map(|tuples: Vec<_>| tuples.into_iter().collect())
+            .parse_stream(input)
+    }
 }
 
 #[cfg(test)]
@@ -54,5 +67,14 @@ mod tests {
 
         assert_eq!(DiffxParser::option(&b"version=1.0"[..]),
                    Ok((("version", "1.0"), Consumed(&b""[..]))));
+    }
+
+    #[test]
+    fn test_option_list() {
+        assert_eq!(DiffxParser::option_list(&b"foo=bar"[..]),
+                   Ok((hashmap!{ "foo" => "bar" }, Consumed(&b""[..]))));
+
+        assert_eq!(DiffxParser::option_list(&b"encoding=utf-8,version=1.0"[..]),
+                   Ok((hashmap!{ "encoding" => "utf-8", "version" => "1.0" }, Consumed(&b""[..]))));
     }
 }

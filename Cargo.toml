@@ -5,3 +5,4 @@ authors = ["Barret Rennie <barret@brennie.ca>"]
 
 [dependencies]
 combine = "^2.3"
+maplit = "^0.1"
