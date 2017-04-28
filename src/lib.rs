@@ -12,9 +12,23 @@ use combine::range::*;
 use combine::primitives::{ParseResult, Parser, RangeStream};
 
 
+#[derive(Debug, PartialEq, Eq)]
+struct SectionHeader<'a> {
+    depth: usize,
+    title: &'a str,
+    options: HashMap<&'a str, &'a str>,
+}
+
 fn is_option_char(c: u8) -> bool {
     match c {
         b'a'...b'z' | b'A'...b'Z' | b'0'...b'9' | b'-' | b'_' | b'.' => true,
+        _ => false,
+    }
+}
+
+fn is_section_header_char(c: u8) -> bool {
+    match c {
+        b'a'...b'z' | b'A'...b'Z' | b'-' => true,
         _ => false,
     }
 }
@@ -50,6 +64,32 @@ impl<'a, I> DiffxParser<I>
             .map(|tuples: Vec<_>| tuples.into_iter().collect())
             .parse_stream(input)
     }
+
+    // Parse a section header.
+    fn section_header(input: I) -> ParseResult<SectionHeader<'a>, I> {
+        let depth = take_while(|c| c == b'.').map(|xs: &[_]| xs.len());
+
+        // Again, the call str::from_utf8_unchecked is safe due to
+        // is_section_header_char only accepting a limited subset of ASCII.
+        let title =
+            take_while(is_section_header_char).map(|s| unsafe { str::from_utf8_unchecked(s) });
+
+        let option_list = skip_many1(byte(b' ')).with(parser(DiffxParser::<I>::option_list));
+
+        (byte(b'#').with(depth),
+         title,
+         byte(b':').with(optional(option_list)),
+         skip_many(byte(b' ')),
+         byte(b'\n'))
+                .map(|(depth, title, maybe_options, _, _)| {
+                         SectionHeader {
+                             depth: depth,
+                             title: title,
+                             options: maybe_options.unwrap_or_else(HashMap::new),
+                         }
+                     })
+                .parse_stream(input)
+    }
 }
 
 #[cfg(test)]
@@ -76,5 +116,43 @@ mod tests {
 
         assert_eq!(DiffxParser::option_list(&b"encoding=utf-8,version=1.0"[..]),
                    Ok((hashmap!{ "encoding" => "utf-8", "version" => "1.0" }, Consumed(&b""[..]))));
+    }
+
+    #[test]
+    fn test_section_header() {
+        assert_eq!(DiffxParser::section_header(&b"#diffx: version=1.0,encoding=utf-8\n"[..]),
+                   Ok((SectionHeader {
+                           depth: 0,
+                           title: "diffx",
+                           options: hashmap!{
+                               "version" => "1.0",
+                               "encoding" => "utf-8",
+                           },
+                       },
+                       Consumed(&b""[..]))));
+
+        assert_eq!(DiffxParser::section_header(&b"#..sub-section: content-length=128\n"[..]),
+                   Ok((SectionHeader {
+                           depth: 2,
+                           title: "sub-section",
+                           options: hashmap!{ "content-length" => "128" },
+                       },
+                       Consumed(&b""[..]))));
+
+        assert_eq!(DiffxParser::section_header(&b"#.section:     \n"[..]),
+                   Ok((SectionHeader {
+                           depth: 1,
+                           title: "section",
+                           options: hashmap!{},
+                       },
+                       Consumed(&b""[..]))));
+
+        assert_eq!(DiffxParser::section_header(&b"#.section:   encoding=utf-8   \n"[..]),
+                   Ok((SectionHeader {
+                           depth: 1,
+                           title: "section",
+                           options: hashmap!{ "encoding" => "utf-8" },
+                      },
+                      Consumed(&b""[..]))));
     }
 }
