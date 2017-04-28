@@ -52,7 +52,7 @@ impl<'a, I> DiffxParser<I>
     fn option(input: I) -> ParseResult<(&'a str, &'a str), I> {
         (parser(DiffxParser::<I>::option_str),
          byte('=' as u8).with(parser(DiffxParser::<I>::option_str)))
-                .parse_stream(input)
+            .parse_stream(input)
     }
 
     // Parse an option list.
@@ -71,24 +71,23 @@ impl<'a, I> DiffxParser<I>
 
         // Again, the call str::from_utf8_unchecked is safe due to
         // is_section_header_char only accepting a limited subset of ASCII.
-        let title =
-            take_while(is_section_header_char).map(|s| unsafe { str::from_utf8_unchecked(s) });
+        let title = take_while(is_section_header_char)
+            .map(|s| unsafe { str::from_utf8_unchecked(s) });
 
         let option_list = skip_many1(byte(b' ')).with(parser(DiffxParser::<I>::option_list));
 
-        (byte(b'#').with(depth),
-         title,
-         byte(b':').with(optional(option_list)),
-         skip_many(byte(b' ')),
-         byte(b'\n'))
-                .map(|(depth, title, maybe_options, _, _)| {
-                         SectionHeader {
-                             depth: depth,
-                             title: title,
-                             options: maybe_options.unwrap_or_else(HashMap::new),
-                         }
-                     })
-                .parse_stream(input)
+        byte(b'#')
+            .with((depth, title.skip(byte(b':')), optional(option_list)))
+            .skip(skip_many(byte(b' ')))
+            .skip(byte(b'\n'))
+            .map(|(depth, title, maybe_options)| {
+                SectionHeader {
+                    depth: depth,
+                    title: title,
+                    options: maybe_options.unwrap_or_else(HashMap::new),
+                }
+            })
+            .parse_stream(input)
     }
 }
 
@@ -152,7 +151,7 @@ mod tests {
                            depth: 1,
                            title: "section",
                            options: hashmap!{ "encoding" => "utf-8" },
-                      },
-                      Consumed(&b""[..]))));
+                       },
+                       Consumed(&b""[..]))));
     }
 }
