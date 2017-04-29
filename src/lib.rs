@@ -9,8 +9,71 @@ use std::str;
 use combine::byte::*;
 use combine::combinator::*;
 use combine::range::*;
-use combine::primitives::{ParseResult, Parser, RangeStream};
+use combine::primitives::{Consumed, Error, ParseError, ParseResult, Parser, RangeStream};
 
+
+#[derive(Debug, PartialEq, Eq)]
+/// A section of a DiffX document.
+pub struct Section<'a> {
+    /// The encoding of this section.
+    ///
+    /// If this was not specified in the options, it will default to the parent
+    /// encoding, if any. Otherwise, it will be [`Encoding::Binary`][binary].
+    ///
+    /// [binary]: enum.Encoding.html#Binary.v
+    pub encoding: Encoding,
+
+    /// The options of this section.
+    pub options: HashMap<&'a str, &'a str>,
+
+    /// The content of this section.
+    ///
+    /// Sections cannot be empty. They can have data (either encoded or
+    /// unencoded) or one or more child sections.
+    pub content: SectionContent<'a>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+/// The content of a section.
+pub enum SectionContent<'a> {
+    /// One or more sections.
+    ChildSections(HashMap<&'a str, Section<'a>>),
+
+    /// Encoded data.
+    ///
+    /// This section contains a string in a particular encoding, indicated by
+    /// the `encoding` of the section which contains it.
+    EncodedData(&'a str),
+
+    /// Raw binary data.
+    RawData(&'a [u8]),
+}
+
+use SectionContent::*;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// An enumeration representing possible encoding of DiffX sections.
+pub enum Encoding {
+    /// Unencoded data.
+    ///
+    /// Sections with this encoding will be treated as a sequence of bytes.
+    Binary,
+
+    /// UTF-8 encoded data.
+    ///
+    /// Sections with this encoding will be treated as UTF-8 encoded strings.
+    Utf8,
+}
+
+impl Encoding {
+    fn from_str(s: &str) -> Option<Encoding> {
+        match s {
+            "utf-8" => Some(Encoding::Utf8),
+            "binary" => Some(Encoding::Binary),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct SectionHeader<'a> {
@@ -89,6 +152,80 @@ impl<'a, I> DiffxParser<I>
             })
             .parse_stream(input)
     }
+
+    // Return a parser that can parse a section of a given depth.
+    //
+    // The `parent_encoding` will be used as the encoding of the section if it
+    // does not specify one.
+    fn section(depth: usize,
+               parent_encoding: Encoding)
+               -> Box<Parser<Input = I, Output = (&'a str, Section<'a>)> + 'a>
+        where I: 'a
+    {
+        parser(move |input: I| {
+                let start = input.position();
+                let (header, input) = try!(parser(DiffxParser::<I>::section_header)
+                    .parse_stream(input));
+
+                if header.depth != depth {
+                    return Err(Consumed::Consumed(ParseError::new(start, Error::Expected(
+                               format!("section with depth {}", depth).into()))));
+                }
+
+                let encoding = match header.options.get("encoding") {
+                    Some(encoding) => {
+                        match Encoding::from_str(encoding) {
+                            Some(encoding) => encoding,
+                            None => {
+                                let msg = ["encoding", encoding].join(" ");
+                                let err = Error::Unexpected(msg.into());
+                                return Err(Consumed::Consumed(ParseError::new(start, err)));
+                            }
+                        }
+                    }
+                    None => parent_encoding,
+                };
+
+                let content_length = match header.options.get("content-length") {
+                    Some(content_length) => {
+                        match content_length.parse() {
+                            Ok(content_length) => Some(content_length),
+                            Err(_) => {
+                                let msg = ["content-length", content_length].join(" ");
+                                let err = Error::Unexpected(msg.into());
+                                return Err(Consumed::Consumed(ParseError::new(start, err)));
+                            }
+                        }
+                    }
+                    None => None,
+                };
+
+                let (content, input) = try!(if let Some(content_length) = content_length {
+                    take(content_length)
+                        .and_then(|bs| match encoding {
+                            Encoding::Binary => Ok(RawData(bs)),
+                            Encoding::Utf8 => str::from_utf8(bs).map(EncodedData),
+                        })
+                        .skip(byte(b'\n'))
+                        .parse_stream(input.into_inner())
+                } else {
+                    many1(DiffxParser::<I>::section(depth + 1, encoding))
+                        .skip(byte(b'\n'))
+                        .map(|sections: Vec<_>| sections.into_iter().collect())
+                        .map(ChildSections)
+                        .parse_stream(input.into_inner())
+                });
+
+                Ok(((header.title,
+                     Section {
+                         encoding: encoding,
+                         options: header.options,
+                         content: content,
+                     }),
+                    input))
+            })
+            .boxed()
+    }
 }
 
 #[cfg(test)]
@@ -154,6 +291,58 @@ mod tests {
                            title: "section",
                            options: hashmap!{ "encoding" => "utf-8" },
                        },
+                       &b""[..])));
+    }
+
+    #[test]
+    fn test_section() {
+        assert_eq!(DiffxParser::section(0, Encoding::Binary)
+                       .parse(&b"#diffx: version=1.0,encoding=utf-8,content-length=0\n\n"[..]),
+                   Ok((("diffx",
+                        Section {
+                            encoding: Encoding::Utf8,
+                            options: hashmap!{
+                                "version" => "1.0",
+                                "encoding" => "utf-8",
+                                "content-length" => "0",
+                            },
+                            content: EncodedData(""),
+                        }),
+                       &b""[..])));
+
+        assert_eq!(DiffxParser::section(0, Encoding::Binary)
+                       .parse(&b"\
+#diffx: version=1.0,encoding=utf-8
+#.foo: content-length=14
+Hello, \xE4\xB8\x96\xE7\x95\x8C
+
+#.bar: content-length=15,encoding=binary
+Goodbye, world!
+
+"[..]),
+                   Ok((("diffx",
+                        Section {
+                            encoding: Encoding::Utf8,
+                            options: hashmap!{
+                                "version" => "1.0",
+                                "encoding" => "utf-8",
+                            },
+                            content: ChildSections(hashmap!{
+                                "foo" => Section {
+                                    encoding: Encoding::Utf8,
+                                    options: hashmap!{ "content-length" => "14" },
+                                    content: EncodedData("Hello, 世界\n")
+                                },
+                                "bar" => Section {
+                                    encoding: Encoding::Binary,
+                                    options: hashmap!{
+                                        "content-length" => "15",
+                                        "encoding" => "binary",
+                                    },
+                                    content: RawData(&b"Goodbye, world!"[..])
+                                },
+                            }),
+                        }),
                        &b""[..])));
     }
 }
