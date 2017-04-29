@@ -232,7 +232,6 @@ impl<'a, I> DiffxParser<I>
                         .parse_stream(input)
                 } else {
                     many1(try(DiffxParser::<I>::section(section_header.depth + 1, encoding)))
-                        .map(|sections: Vec<_>| sections.into_iter().collect())
                         .map(ChildSections)
                         .parse_stream(input)
                 });
@@ -405,5 +404,9 @@ Goodbye, world!
                             }),
                         }),
                        &b""[..])));
+
+        assert!(DiffxParser::section(0, Encoding::Binary)
+            .parse(&b"#diffx: version=1.0,encoding=utf-8\n\n"[..])
+            .is_err());
     }
 }
