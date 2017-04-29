@@ -93,33 +93,33 @@ impl<'a, I> DiffxParser<I>
 
 #[cfg(test)]
 mod tests {
-    use combine::primitives::Consumed::Consumed;
     use super::*;
 
     #[test]
     fn test_option() {
-        assert_eq!(DiffxParser::option(&b"foo=bar"[..]),
-                   Ok((("foo", "bar"), Consumed(&b""[..]))));
+        assert_eq!(parser(DiffxParser::option).parse(&b"foo=bar"[..]),
+                   Ok((("foo", "bar"), &b""[..])));
 
-        assert_eq!(DiffxParser::option(&b"encoding=utf-8"[..]),
-                   Ok((("encoding", "utf-8"), Consumed(&b""[..]))));
+        assert_eq!(parser(DiffxParser::option).parse(&b"encoding=utf-8"[..]),
+                   Ok((("encoding", "utf-8"), &b""[..])));
 
-        assert_eq!(DiffxParser::option(&b"version=1.0"[..]),
-                   Ok((("version", "1.0"), Consumed(&b""[..]))));
+        assert_eq!(parser(DiffxParser::option).parse(&b"version=1.0"[..]),
+                   Ok((("version", "1.0"), &b""[..])));
     }
 
     #[test]
     fn test_option_list() {
-        assert_eq!(DiffxParser::option_list(&b"foo=bar"[..]),
-                   Ok((hashmap!{ "foo" => "bar" }, Consumed(&b""[..]))));
+        assert_eq!(parser(DiffxParser::option_list).parse(&b"foo=bar"[..]),
+                   Ok((hashmap!{ "foo" => "bar" }, &b""[..])));
 
-        assert_eq!(DiffxParser::option_list(&b"encoding=utf-8,version=1.0"[..]),
-                   Ok((hashmap!{ "encoding" => "utf-8", "version" => "1.0" }, Consumed(&b""[..]))));
+        assert_eq!(parser(DiffxParser::option_list).parse(&b"encoding=utf-8,version=1.0"[..]),
+                   Ok((hashmap!{ "encoding" => "utf-8", "version" => "1.0" }, &b""[..])));
     }
 
     #[test]
     fn test_section_header() {
-        assert_eq!(DiffxParser::section_header(&b"#diffx: version=1.0,encoding=utf-8\n"[..]),
+        assert_eq!(parser(DiffxParser::section_header)
+                       .parse(&b"#diffx: version=1.0,encoding=utf-8\n"[..]),
                    Ok((SectionHeader {
                            depth: 0,
                            title: "diffx",
@@ -128,30 +128,32 @@ mod tests {
                                "encoding" => "utf-8",
                            },
                        },
-                       Consumed(&b""[..]))));
+                       &b""[..])));
 
-        assert_eq!(DiffxParser::section_header(&b"#..sub-section: content-length=128\n"[..]),
+        assert_eq!(parser(DiffxParser::section_header)
+                       .parse(&b"#..sub-section: content-length=128\n"[..]),
                    Ok((SectionHeader {
                            depth: 2,
                            title: "sub-section",
                            options: hashmap!{ "content-length" => "128" },
                        },
-                       Consumed(&b""[..]))));
+                       &b""[..])));
 
-        assert_eq!(DiffxParser::section_header(&b"#.section:     \n"[..]),
+        assert_eq!(parser(DiffxParser::section_header).parse(&b"#.section:     \n"[..]),
                    Ok((SectionHeader {
                            depth: 1,
                            title: "section",
                            options: hashmap!{},
                        },
-                       Consumed(&b""[..]))));
+                       &b""[..])));
 
-        assert_eq!(DiffxParser::section_header(&b"#.section:   encoding=utf-8   \n"[..]),
+        assert_eq!(parser(DiffxParser::section_header)
+                       .parse(&b"#.section:   encoding=utf-8   \n"[..]),
                    Ok((SectionHeader {
                            depth: 1,
                            title: "section",
                            options: hashmap!{ "encoding" => "utf-8" },
                        },
-                       Consumed(&b""[..]))));
+                       &b""[..])));
     }
 }
