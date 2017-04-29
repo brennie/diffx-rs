@@ -8,8 +8,8 @@ use std::str;
 
 use combine::byte::*;
 use combine::combinator::*;
-use combine::range::*;
 use combine::primitives::{Consumed, Error, ParseError, ParseResult, Parser, RangeStream};
+use combine::range::*;
 
 
 #[derive(Debug, PartialEq, Eq)]
