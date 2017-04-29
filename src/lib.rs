@@ -186,7 +186,29 @@ impl<'a, I> DiffxParser<I>
                     None => parent_encoding,
                 };
 
-                let content_length = match header.options.get("content-length") {
+                let (content, input) = try!(DiffxParser::<I>::section_content(&header, encoding)
+                    .parse_stream(input.into_inner()));
+
+                Ok(((header.title,
+                     Section {
+                         encoding: encoding,
+                         options: header.options,
+                         content: content,
+                     }),
+                    input))
+            })
+            .boxed()
+    }
+
+    // Return a parser that will parse the content of a section given its header.
+    fn section_content<'b>(section_header: &'b SectionHeader<'a>,
+                           encoding: Encoding)
+                           -> Box<Parser<Input = I, Output = (SectionContent<'a>)> + 'b>
+        where I: 'a
+    {
+        parser(move |input: I| {
+                let start = input.position();
+                let content_length = match section_header.options.get("content-length") {
                     Some(content_length) => {
                         match content_length.parse() {
                             Ok(content_length) => Some(content_length),
@@ -207,22 +229,15 @@ impl<'a, I> DiffxParser<I>
                             Encoding::Utf8 => str::from_utf8(bs).map(EncodedData),
                         })
                         .skip(byte(b'\n'))
-                        .parse_stream(input.into_inner())
+                        .parse_stream(input)
                 } else {
-                    many1(DiffxParser::<I>::section(depth + 1, encoding))
-                        .skip(byte(b'\n'))
+                    many1(try(DiffxParser::<I>::section(section_header.depth + 1, encoding)))
                         .map(|sections: Vec<_>| sections.into_iter().collect())
                         .map(ChildSections)
-                        .parse_stream(input.into_inner())
+                        .parse_stream(input)
                 });
 
-                Ok(((header.title,
-                     Section {
-                         encoding: encoding,
-                         options: header.options,
-                         content: content,
-                     }),
-                    input))
+                Ok((content, input))
             })
             .boxed()
     }
@@ -310,13 +325,12 @@ mod tests {
                         }),
                        &b""[..])));
 
-        assert_eq!(DiffxParser::section(0, Encoding::Binary)
-                       .parse(&b"\
+        assert_eq!(DiffxParser::section(0, Encoding::Binary).parse(&b"\
 #diffx: version=1.0,encoding=utf-8
 #.foo: content-length=14
 Hello, \xE4\xB8\x96\xE7\x95\x8C
 
-#.bar: content-length=15,encoding=binary
+#.bar: content-length=16,encoding=binary
 Goodbye, world!
 
 "[..]),
@@ -336,10 +350,57 @@ Goodbye, world!
                                 "bar" => Section {
                                     encoding: Encoding::Binary,
                                     options: hashmap!{
-                                        "content-length" => "15",
+                                        "content-length" => "16",
                                         "encoding" => "binary",
                                     },
-                                    content: RawData(&b"Goodbye, world!"[..])
+                                    content: RawData(&b"Goodbye, world!\n"[..])
+                                },
+                            }),
+                        }),
+                       &b""[..])));
+
+        assert_eq!(DiffxParser::section(0, Encoding::Binary).parse(&b"\
+#diffx: version=1.0,encoding=utf-8
+#.foo:
+#..bar: content-length=14
+Hello, world!
+
+#..baz: content-length=16
+Goodbye, world!
+
+#.qux: content-length=0
+
+"[..]),
+                   Ok((("diffx",
+                        Section {
+                            encoding: Encoding::Utf8,
+                            options: hashmap!{
+                                "version" => "1.0",
+                                "encoding" => "utf-8",
+                            },
+                            content: ChildSections(hashmap!{
+                                "foo" => Section {
+                                    encoding: Encoding::Utf8,
+                                    options: hashmap!{},
+                                    content: ChildSections(hashmap!{
+                                        "bar" => Section {
+                                            encoding: Encoding::Utf8,
+                                            options: hashmap!{ "content-length" => "14" },
+                                            content: EncodedData("Hello, world!\n"),
+
+                                        },
+                                        "baz" => Section {
+                                            encoding: Encoding::Utf8,
+                                            options: hashmap!{ "content-length" => "16" },
+                                            content: EncodedData("Goodbye, world!\n"),
+
+                                        },
+                                    }),
+                                },
+                                "qux" => Section{
+                                    encoding: Encoding::Utf8,
+                                    options: hashmap!{ "content-length" => "0" },
+                                    content: EncodedData(""),
                                 },
                             }),
                         }),
