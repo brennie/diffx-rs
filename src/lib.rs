@@ -123,7 +123,7 @@ impl<'a, I> DiffxParser<I>
     // Option lists are a list of options separated by `,`. The result is
     // collected into a HashMap for convenience.
     fn option_list(input: I) -> ParseResult<HashMap<&'a str, &'a str>, I> {
-        sep_by(parser(DiffxParser::<I>::option), byte(',' as u8))
+        sep_by(parser(DiffxParser::<I>::option), range(&b", "[..]))
             .map(|tuples: Vec<_>| tuples.into_iter().collect())
             .parse_stream(input)
     }
@@ -263,14 +263,14 @@ mod tests {
         assert_eq!(parser(DiffxParser::option_list).parse(&b"foo=bar"[..]),
                    Ok((hashmap!{ "foo" => "bar" }, &b""[..])));
 
-        assert_eq!(parser(DiffxParser::option_list).parse(&b"encoding=utf-8,version=1.0"[..]),
+        assert_eq!(parser(DiffxParser::option_list).parse(&b"encoding=utf-8, version=1.0"[..]),
                    Ok((hashmap!{ "encoding" => "utf-8", "version" => "1.0" }, &b""[..])));
     }
 
     #[test]
     fn test_section_header() {
         assert_eq!(parser(DiffxParser::section_header)
-                       .parse(&b"#diffx: version=1.0,encoding=utf-8\n"[..]),
+                       .parse(&b"#diffx: version=1.0, encoding=utf-8\n"[..]),
                    Ok((SectionHeader {
                            depth: 0,
                            title: "diffx",
@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn test_section() {
         assert_eq!(DiffxParser::section(0, Encoding::Binary)
-                       .parse(&b"#diffx: version=1.0,encoding=utf-8,content-length=0\n\n"[..]),
+                       .parse(&b"#diffx: version=1.0, encoding=utf-8, content-length=0\n\n"[..]),
                    Ok((("diffx",
                         Section {
                             encoding: Encoding::Utf8,
@@ -325,11 +325,11 @@ mod tests {
                        &b""[..])));
 
         assert_eq!(DiffxParser::section(0, Encoding::Binary).parse(&b"\
-#diffx: version=1.0,encoding=utf-8
+#diffx: version=1.0, encoding=utf-8
 #.foo: content-length=14
 Hello, \xE4\xB8\x96\xE7\x95\x8C
 
-#.bar: content-length=16,encoding=binary
+#.bar: content-length=16, encoding=binary
 Goodbye, world!
 
 "[..]),
@@ -359,7 +359,7 @@ Goodbye, world!
                        &b""[..])));
 
         assert_eq!(DiffxParser::section(0, Encoding::Binary).parse(&b"\
-#diffx: version=1.0,encoding=utf-8
+#diffx: version=1.0, encoding=utf-8
 #.foo:
 #..bar: content-length=14
 Hello, world!
@@ -406,7 +406,7 @@ Goodbye, world!
                        &b""[..])));
 
         assert!(DiffxParser::section(0, Encoding::Binary)
-            .parse(&b"#diffx: version=1.0,encoding=utf-8\n\n"[..])
+            .parse(&b"#diffx: version=1.0, encoding=utf-8\n\n"[..])
             .is_err());
     }
 }
