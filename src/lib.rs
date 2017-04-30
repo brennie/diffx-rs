@@ -137,11 +137,10 @@ impl<'a, I> DiffxParser<I>
         let title = take_while(is_section_header_char)
             .map(|s| unsafe { str::from_utf8_unchecked(s) });
 
-        let option_list = skip_many1(byte(b' ')).with(parser(DiffxParser::<I>::option_list));
-
         byte(b'#')
-            .with((depth, title.skip(byte(b':')), optional(option_list)))
-            .skip(skip_many(byte(b' ')))
+            .with((depth,
+                   title.skip(byte(b':')).skip(skip_many(byte(b' '))),
+                   optional(parser(DiffxParser::<I>::option_list))))
             .skip(byte(b'\n'))
             .map(|(depth, title, maybe_options)| {
                 SectionHeader {
@@ -290,6 +289,16 @@ mod tests {
                        },
                        &b""[..])));
 
+        assert_eq!(parser(DiffxParser::section_header).parse(&b"#diffx:version=1.0\n"[..]),
+                   Ok((SectionHeader {
+                           depth: 0,
+                           title: "diffx",
+                           options: hashmap!{
+                               "version" => "1.0",
+                           },
+                       },
+                       &b""[..])));
+
         assert_eq!(parser(DiffxParser::section_header).parse(&b"#.section:     \n"[..]),
                    Ok((SectionHeader {
                            depth: 1,
@@ -298,14 +307,9 @@ mod tests {
                        },
                        &b""[..])));
 
-        assert_eq!(parser(DiffxParser::section_header)
-                       .parse(&b"#.section:   encoding=utf-8   \n"[..]),
-                   Ok((SectionHeader {
-                           depth: 1,
-                           title: "section",
-                           options: hashmap!{ "encoding" => "utf-8" },
-                       },
-                       &b""[..])));
+        assert!(parser(DiffxParser::section_header)
+            .parse(&b"#.section:   encoding=utf-8   \n"[..])
+            .is_err());
     }
 
     #[test]
